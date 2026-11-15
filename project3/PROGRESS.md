@@ -15,10 +15,10 @@ Add to the entry at the end of every class, and whenever you stop working. Short
 - Blocked: nothing
 
 ## Session 3 · Thu 12 Nov
-- Done:
-- Raw records so far:
-- Next:
-- Blocked:
+- Done: flow.py (checkpoint E), sample, chart and analysis draft (catch-up on Sun 15 Nov)
+- Raw records so far: 95,792
+- Next: README peer test, check_project.py, rubric, submit
+- Blocked: nothing
 
 ## Session 4 · Mon 16 Nov
 - Done:

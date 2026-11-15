@@ -1,37 +1,55 @@
-# TODO: your project title
+# Coinbase trades: BTC buy pressure per minute
 
-**Author:** TODO
+**Author:** Mani Ferdosian
 **DS 3022 Data Project 3, Fall 2026**
-
-> There is no interview for this project: this README is where you explain and defend your pipeline. Fill in the title, your name and every italic placeholder, then delete this note. Keep the headings: `kit/check_project.py` looks for them.
 
 ## Data source
 
-_(replace: what source, which URL or stream, pull or push, what one message contains. Mention any account, key or User-Agent needed. If you replay an archive rather than stream live, say so.)_
+Live trades from the Coinbase Exchange WebSocket (wss://ws-feed.exchange.coinbase.com), matches channel, for six products: BTC-USD, ETH-USD, SOL-USD, XRP-USD, DOGE-USD and ADA-USD. It's push, the producer subscribes once and Coinbase sends one match message per trade with trade_id, product_id, side, price, size and time. No account or key is needed. There's no replay so everything was collected live on 15 Nov 2026 between 17:52 and 18:22 UTC.
 
 ## How to run
 
-_(replace: the exact commands, in order, from a fresh clone. A classmate will follow them in Session 4 (Mon 16 Nov) without asking you. Include: virtual environment and `pip install`, starting the cluster, creating the topic, running the producer and lander, running the flow on the full data and on the sample:)_
+From a fresh clone of ds3022-streaming:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt prefect matplotlib
+docker compose up -d
+docker exec -it redpanda-0 rpk topic create coinbase_trades -p 3 -r 3
 cd project3
+python producer.py       # terminal 1, Ctrl+C to stop
+python lander.py         # terminal 2, Ctrl+C to stop after the last batch
+python flow.py           # full data in data/raw
 python flow.py data/sample      # runs without Kafka, on the committed sample
 ```
 
+To see the runs in Prefect, run `prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api` and `prefect server start` in another terminal first. Stop the cluster with `docker compose down` (never with -v).
+
 ## Architecture
 
-_(replace: a diagram (an image in docs/ or a text diagram) of producer → topic → lander → raw Parquet → flow tasks → tables → charts, with the names of your files, topic, tables and charts.)_
+```
+Coinbase WebSocket
+  -> producer.py  (key = product_id, envelope {"action": "live", "data": ...})
+  -> Kafka topic coinbase_trades  (3 partitions, 3 replicas)
+  -> lander.py  (1,000 records or 60 s per file, consumer group coinbase_trades_lander)
+  -> data/raw/coinbase_*.parquet
+  -> flow.py (Prefect flow coinbase-pipeline, DuckDB coinbase.duckdb)
+       load_raw  -> raw_trades
+       stage     -> stg_records
+       entities  -> trades
+       marts     -> mart_btc_pressure
+       chart     -> charts/btc_buy_pressure.png
+```
 
 ## Design decisions
 
-Answer each in 2-4 sentences, in your own words, with your own numbers.
-
-1. **Key and partitions.** _(replace: which key, why, and what it guarantees about order. What would go wrong with another key?)_
-2. **Batch size and time.** _(replace: your batch size and time limit. With your source's rate, which rule closes most batches? How many files per hour does that make?)_
-3. **Offsets after the file.** _(replace: what happens if the lander crashes after writing a file but before storing offsets, and why you accept that.)_
-4. **Duplicates.** _(replace: what makes two records the same Kafka record, and what makes them the same thing. Which SQL removes each kind?)_
-5. **Windows and time.** _(replace: which time column your analysis uses (event time or landing time), which window size, and why.)_
-6. **Ten times the volume.** _(replace: what in your pipeline would break or slow down first at 10x your rate, and what you would change.)_
+1. **Key and partitions.** The key is product_id so all trades of one product stay in order in one partition, which is what I need to count buys and sells per minute for BTC-USD. The downside is skew since BTC-USD is 86% of all trades, partition 0 holds 82,521 of my 94,770 trades. A key like trade_id would spread better but then one product's trades would be split across partitions and lose their order.
+2. **Batch size and time.** Files close at 1,000 records or 60 seconds. At about 61 trades a second the size rule closes almost every batch (94 of my 98 files have 1,000 rows), only the last batch after I stop the producer closes on time. That's around 220 files an hour.
+3. **Offsets after the file.** If the lander crashes after writing a file but before storing offsets, it reads the same records again on restart and lands them a second time (card D1 gave me 1,000 copies). I accept that because a copy can be removed later in the flow but a lost record can't come back.
+4. **Duplicates.** The same Kafka record is the same partition + offset, and `SELECT DISTINCT * EXCLUDE (landed_at)` in stage() removes it. The same thing is the same product_id + trade_id, removed in entities() with `QUALIFY row_number() OVER (PARTITION BY product_id, trade_id ORDER BY kafka_offset DESC) = 1`. Coinbase sends each trade only once so in my data entities() removed 0 rows, a trade never changes so any copy would be the same anyway.
+5. **Windows and time.** I use event_time (the time field from Coinbase, cast to a UTC timestamp) and never landed_at, because a stopped lander makes gaps and spikes in landing time that didn't happen on the market. I use 1-minute windows since I only have about 30 minutes of data, 1-hour windows would give one or two points.
+6. **Ten times the volume.** At around 600 trades a second partition 0 would get most of it because of BTC-USD, so one lander reading that partition would fall behind first. I'd also get about 2,200 small files an hour and the flow rereads all of them every run. I'd raise the batch size to 10,000, run more lander copies in the same consumer group and make the flow load only new files.
 
 ## Chaos round
 
@@ -47,29 +65,29 @@ From the flow log on the full data (screenshot in `docs/`):
 
 | Number | Full data | Sample (`data/sample`) |
 |---|---:|---:|
-| Raw records landed | TODO | TODO |
-| Malformed (kept in raw) | TODO | TODO |
-| Unique Kafka records | TODO | TODO |
-| Unique TODO (your entity) | TODO | TODO |
+| Raw records landed | 95,792 | 5,000 |
+| Malformed (kept in raw) | 1 | 0 |
+| Unique Kafka records | 94,770 | 4,998 |
+| Unique trades (`product_id` + `trade_id`) | 94,770 | 4,998 |
+
+Unique Kafka records is a bit lower than four_numbers.py gave in the chaos round (94,791) because stage() also drops the subscriptions and last_match messages, which aren't new trades.
 
 ## Challenges / Obstacles
 
-_(replace: what this source made hard in gathering, processing and analysis, and how you worked through it. What methods and tools did you use?)_
+Coinbase has no replay so I could only collect live, and the first messages after connecting are a subscriptions reply and one last_match per product, which aren't new trades. The producer sends them anyway (the subscriptions one has no product_id so it goes without a key) and stage() filters them out with msg_type = 'match'. The side field was confusing at first since it's the maker side, so side = 'sell' actually means the taker bought. BTC-USD also makes up 86% of trades so partition 0 is much bigger than the other two. For the tools I used rpk and the Redpanda Console to check the topic, four_numbers.py to count during the chaos round, and DuckDB plus Prefect for the flow.
 
 ## Analysis
 
-_(replace: one clear paragraph. Your research question, what the data shows, one finding that surprised you or is not obvious, and one limitation of your data or method.)_
+My question was whether buy pressure on BTC-USD, the share of trades in each minute where the taker was a buyer, moves with the price. Across 24 one-minute windows (81,643 BTC-USD trades) the taker buy share stayed between 42.9% and 57.2% with an average of 48.9%, so sellers were slightly more aggressive most minutes, and the correlation with the average price was weak (-0.23). What surprised me is that the biggest buy minute (57.2% at 18:15 UTC) came right before the biggest price jump, but by 18:17 when the price peaked at 64,732 USD the buy share had dropped to its lowest at 42.9%, so the buying seemed to come before the move and not with it. The main limitation is that it's only about 30 minutes of one evening with gaps at 18:10 to 18:13 and 18:18 to 18:20 when my producer was stopped for the chaos cards, so I can't say anything about other hours or days.
 
 ## Plot / Visualization
 
-_(replace: at least one chart, saved in charts/ and shown here. Give it a title and labelled axes with units.)_
-
-![TODO chart title](charts/TODO.png)
+![BTC-USD taker buys stay near 50% and barely follow the price](charts/btc_buy_pressure.png)
 
 ## Reflection
 
-_(replace: about 150 words, first person. What did you learn about streaming systems that you did not know before Thu 22 Oct? What would you do differently if you started again?)_
+Before this class I thought of streaming as just reading data as it comes in, I didn't really think about what happens when something breaks in the middle. The chaos round changed that the most. Seeing the lander crash after writing a file and then land the same 1,000 records again made at-least-once make sense, and it showed me why the flow has to remove copies instead of hoping they never happen. I also learned that the key decides how the data spreads, my product_id key put 86% of the trades on one partition which I didn't expect when I picked it. Stopping a broker and watching the producer keep going showed me what replication factor 3 actually does. If I started again I'd collect for longer and at different times of day so my analysis covers more than half an hour, and I'd pick a key or add products so the partitions are more even.
 
 ## Acknowledgements
 
-_(replace: everyone who helped you and how (classmates, instructor, online sources), code you reused (for example connection code from probe.py), and any AI assistance: what for, and how you checked the result. Write "None" if there is nothing to declare.)_
+The producer, lander and flow start from the class scripts quakes_producer.py, quakes_lander.py and quakes_flow.py, and the SCHEMA, to_row(), stage(), entities() and four_numbers.py code comes from the Session 2 and 3 worksheets. The WebSocket subscribe message follows probe.py from the kit. I used Claude (Claude Code) as an AI assistant to help adapt the scripts, run the chaos cards and explain code and and files to write this README. I checked the results by running the flow twice and comparing the four numbers, checking them against the topic totals from rpk, and reading through the code and text myself.
