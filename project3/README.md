@@ -37,9 +37,9 @@ Answer each in 2-4 sentences, in your own words, with your own numbers.
 
 | Card | Prediction | What I did | Numbers before → after | Explanation |
 |---|---|---|---|---|
-| D1 Crash between file and offsets | TODO | TODO | TODO | TODO |
-| D2 Poison message | TODO | TODO | TODO | TODO |
-| TODO (D3, D4 or D5) | TODO | TODO | TODO | TODO |
+| D1 Crash between file and offsets | Raw goes up by the new messages plus the 1,000 crashed records, unique records only by the new ones | Stopped the lander, ran the producer for a few minutes, ran the lander with crash and then normally, counted | raw 71,255 -> 89,153; malformed 0 -> 0; unique records 71,255 -> 88,153; unique trades 71,254 -> 88,151 | Offsets get stored after the file so the crashed batch was read and landed twice (at-least-once). Unique records still match the topic total so the copies don't count and nothing was lost. |
+| D2 Poison message | The lander keeps running and raw and malformed both go up by 1 | Sent "this is not JSON" to the topic with rpk, waited for the next batch, counted | raw 89,153 -> 89,154; malformed 0 -> 1; unique records 88,153 -> 88,153; unique trades 88,151 -> 88,151 | `to_row()` caught the bad JSON and landed it as malformed, so the lander didn't crash. If it had crashed it would hit the same message on every restart and block the partition. |
+| D3 Broker down | The producer logs some errors but keeps going and nothing gets lost | Stopped redpanda-1 for about a minute and a half while the producer and lander ran, started it again, stopped the producer, counted | raw 89,154 -> 95,792; malformed 1 -> 1; unique records 88,153 -> 94,791; unique trades 88,151 -> 94,788 | With replication factor 3 the other two brokers took over as leaders and kept taking writes. Raw and unique records both went up by 6,638 so nothing was lost or duplicated. |
 
 ## The four numbers
 
