@@ -1,91 +1,64 @@
-"""Earthquakes -> Kafka topic "quakes".
+"""Coinbase trades -> Kafka topic "coinbase_trades".
 
-  python quakes_producer.py history 7   # PULL: the last 7 days from the EMSC catalogue
-  python quakes_producer.py live        # PUSH: new and updated events from the EMSC WebSocket
+  python producer.py        # PUSH: every trade ("match") of six products, from the Coinbase WebSocket
 
-Adapted from Professor Magee's stream-seismic.py (learn-kafka).
+Adapted from the class script quakes_producer.py (Mon 02 Nov).
+The connection code follows probe.py from the Project 3 kit.
 """
 import asyncio
 import json
 import logging
-import sys
-import time
-from datetime import datetime, timedelta, timezone
 
-import requests
 from quixstreams import Application
 from tornado.websocket import websocket_connect
 
 BROKER = "127.0.0.1:19092"
-TOPIC = "quakes"
-FDSN_URL = "https://www.seismicportal.eu/fdsnws/event/1/query"
-WSS_URL = "wss://www.seismicportal.eu/standing_order/websocket"
+TOPIC = "coinbase_trades"  # part 1: the name on my card
+WSS_URL = "wss://ws-feed.exchange.coinbase.com"
+SUBSCRIBE = {"type": "subscribe",
+             "product_ids": ["BTC-USD", "ETH-USD", "SOL-USD",
+                             "XRP-USD", "DOGE-USD", "ADA-USD"],
+             "channels": ["matches"]}
 
 
 def send(producer, message):
-    """One Kafka record per message. Key = the event id, so every
-    version of the same earthquake goes to the same partition, in order."""
-    unid = message["data"]["properties"]["unid"]
-    producer.produce(topic=TOPIC, key=unid, value=json.dumps(message))
-    return unid
-
-
-def history(producer, days):
-    """PULL: ask the catalogue for one day at a time (far below the 20,000 limit)."""
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    total = 0
-    for back in range(days - 1, -1, -1):  # the last N days, today included
-        start = today - timedelta(days=back)
-        end = start + timedelta(days=1)
-        r = requests.get(
-            FDSN_URL,
-            params={
-                "start": start.strftime("%Y-%m-%dT%H:%M:%S"),
-                "end": end.strftime("%Y-%m-%dT%H:%M:%S"),
-                "format": "json",
-                "limit": 20000,
-                "orderby": "time-asc",
-            },
-            timeout=60,
-        )
-        if r.status_code == 204:  # no events that day
-            continue
-        r.raise_for_status()
-        features = r.json()["features"]
-        for feature in features:
-            send(producer, {"action": "history", "data": feature})
-        total += len(features)
-        logging.info("%s  %4d events   total %d", start.date(), len(features), total)
-        time.sleep(1)  # be polite to a free public service
-    logging.info("History done: %d events sent to %s", total, TOPIC)
+    """Part 2: one Kafka record per message, keyed as on my card."""
+    key = message["data"].get("product_id")  # .get(): no crash if missing
+    if key is None:
+        logging.warning("No product_id: sent without a key")
+    producer.produce(topic=TOPIC, key=key, value=json.dumps(message))
 
 
 async def live(producer):
-    """PUSH: keep one connection open; EMSC sends each new or updated event."""
-    ws = await websocket_connect(WSS_URL, ping_interval=15)
-    logging.info("Connected. Waiting for earthquakes (often about one a minute)...")
+    """Part 3: PUSH over a WebSocket, with a reconnect loop."""
+    sent = 0
     while True:
-        text = await ws.read_message()
-        if text is None:
-            logging.warning("The server closed the connection")
-            break
         try:
-            message = json.loads(text)
-            unid = send(producer, message)
-            p = message["data"]["properties"]
-            logging.info("%-7s %s  M%s  %s", message.get("action"), unid, p.get("mag"), p.get("flynn_region"))
-        except (ValueError, KeyError, TypeError) as e:
-            logging.warning("Skipped a message I could not read: %r", e)
+            ws = await websocket_connect(WSS_URL, ping_interval=15)
+            if SUBSCRIBE:  # Coinbase closes the connection after 5 s without it
+                await ws.write_message(json.dumps(SUBSCRIBE))
+            logging.info("Connected. Waiting for trades...")
+            while True:
+                text = await ws.read_message()
+                if text is None:
+                    break  # the server closed the connection
+                try:
+                    send(producer, {"action": "live", "data": json.loads(text)})
+                    sent += 1
+                    if sent % 1000 == 0:  # part 4: one line every 1,000 messages
+                        logging.info("%d messages sent to %s", sent, TOPIC)
+                except (ValueError, KeyError, TypeError) as e:
+                    logging.warning("Skipped a message: %r", e)
+        except Exception as e:
+            logging.warning("Connection failed: %r", e)
+        logging.info("Reconnecting in 5 s")
+        await asyncio.sleep(5)
 
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else "live"
     app = Application(broker_address=BROKER, loglevel="WARNING")
     with app.get_producer() as producer:
-        if mode == "history":
-            history(producer, int(sys.argv[2]) if len(sys.argv) > 2 else 7)
-        else:
-            asyncio.run(live(producer))
+        asyncio.run(live(producer))
 
 
 if __name__ == "__main__":
