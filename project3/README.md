@@ -12,8 +12,9 @@ Live trades from the Coinbase Exchange WebSocket (wss://ws-feed.exchange.coinbas
 From a fresh clone of ds3022-streaming:
 
 ```bash
+cd ds3022-streaming
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt prefect matplotlib
 docker compose up -d
 docker exec -it redpanda-0 rpk topic create coinbase_trades -p 3 -r 3

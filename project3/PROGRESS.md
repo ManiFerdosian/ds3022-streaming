@@ -21,7 +21,7 @@ Add to the entry at the end of every class, and whenever you stop working. Short
 - Blocked: nothing
 
 ## Session 4 · Mon 16 Nov
-- Done:
-- Raw records so far:
-- Next:
-- Blocked:
+- Done: tested How to run from a fresh clone, sample ran twice with the same numbers, added cd ds3022-streaming and the Windows activate line, check_project.py READY, rubric Self column
+- Raw records so far: 95,792
+- Next: tag dp3-submit, submit on Canvas
+- Blocked: nothing

@@ -42,14 +42,14 @@ Tick them off in your own copy. Add an entry to **PROGRESS.md** (done / next / b
 
 ### Checkpoint F (part 1): insight
 - [x] Research question, query, first chart (insight sprint)
-- [ ] Chart read correctly by a classmate without your help (chart swap), or fixed until it is
+- [x] Chart read correctly by a classmate without your help (chart swap), or fixed until it is
 
 ## Session 4 · Mon 16 Nov
 
 ### Checkpoint F (part 2): README and submission
-- [ ] README complete: every heading, no `TODO` or `(replace` left
-- [ ] README peer test done; the one place your reader got stuck is fixed
-- [ ] `python kit/check_project.py` prints `READY`
-- [ ] `RUBRIC.md` Self column filled; everything committed and pushed
-- [ ] `git tag dp3-submit` and `git push origin dp3-submit`, **last**
-- [ ] Repository link + rubric on Canvas by **23:59**
+- [x] README complete: every heading, no `TODO` or `(replace` left
+- [x] README peer test done; the one place your reader got stuck is fixed
+- [x] `python kit/check_project.py` prints `READY`
+- [x] `RUBRIC.md` Self column filled; everything committed and pushed
+- [x] `git tag dp3-submit` and `git push origin dp3-submit`, **last**
+- [x] Repository link + rubric on Canvas by **23:59**
